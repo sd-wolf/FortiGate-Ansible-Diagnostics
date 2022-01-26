@@ -58,7 +58,7 @@ Simply call the Ansible playbook as necessary. Some playbooks have extra paramet
 
 ## Current issues:
 1. Uses password logon to the FortiGates. Need to resolve to use certificates / store the password in Ansible Vault.
-2. Passwords for logon are currently stored in the inventory. This is in cleartext (BAD!)
+2. FortiGate passwords are visibile in verbose log output when running Ansible.
 
 ## References
 These playbooks are heavily inspired by: 

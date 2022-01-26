@@ -1,0 +1,90 @@
+- hosts: FortiGates
+  vars:
+    base_folder_path: '/tmp/fgt/'
+    debug_script_path: 'fgt.debug.shell.task'
+    output_filename: 'cpu_mem_output.txt'
+    email_sender: '<replace email sender>'
+    email_server: '<replace email server>'
+    email_server_port: '<replace email server port>'
+    email_diagnostic_type: 'CPU and memory diagnostic report'
+    email_recipient: '<replace email recipient>'
+    email_recipient_address: '<replace recipient email address>'
+    top_repeat: '{{ top_iterations | default("15") }}'
+    top_timer: '{{ top_delay | default("2") }}'
+
+  tasks:
+   - name: Create temporary directory
+     ansible.builtin.tempfile:
+       state: directory
+       prefix: '{{base_folder_path}}'
+     register: folder_path
+     delegate_to: localhost
+
+   - name: Prepare the CPU and memory diagnostic shell script
+     raw: |
+            cat > {{folder_path.path}}/{{ debug_script_path }} << EOF_OUTER
+            echo 'CPU and Memory Diagnostic Commands'
+            echo '======================================='
+            sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            get system status
+            get system performance status
+            diagnose autoupdate versions
+            get hardware status
+            diagnose hardware deviceinfo disk
+            diagnose sys top {{ top_timer }} 50 {{ top_repeat }}
+            get hardware memory
+            diagnose hardware sysinfo memory
+            diagnose hardware sysinfo shm
+            diagnose hardware sysinfo slab
+            diagnose hardware sysinfo conserve
+            diagnose firewall iprope state
+            diagnose firewall iplist
+            get system performance firewall statistics
+            get sys performance firewall packet-distribution
+            diagnose sys session stat
+            diagnose sys session full-stat
+            get router info routing-table all
+            diagnose debug crashlog read
+            exit
+            EOF
+            echo ''
+            echo '======================================='
+            echo 'Report complete'
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Execute the diagnostic script
+     raw: |
+            chmod +x {{folder_path.path}}/{{ debug_script_path }} && {{folder_path.path}}/{{ debug_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     register: get_output
+     delegate_to: localhost
+
+   - name: Save diagnostic output to local file
+     copy:
+       content: '{{ get_output.stdout }}'
+       dest: '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+     delegate_to: localhost
+
+   - name: Send email containing diagnostic output
+     community.general.mail:
+       sender: {{ email_sender }}
+       host: {{ email_server }}
+       port: {{ email_server_port }}
+       to: {{ email_recipient }}
+       subject: FortiGate {{ email_diagnostic_type  for {{ inventory_hostname }}
+       body: 'Please find the attached {{ email_diagnostic_type }} for {{ inventory_hostname }}.'
+       attach:
+       - '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+       headers: 
+       - Reply-To={{ email_recipient_address }}
+       charset: us-ascii
+       secure: never
+     delegate_to: localhost
+
+   - name: Delete temporary files
+     file:
+       state: absent
+       path: '{{folder_path.path}}'
+     delegate_to: localhost

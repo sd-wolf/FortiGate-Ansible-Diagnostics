@@ -1,0 +1,70 @@
+- hosts: FortiGates
+  vars:
+    base_folder_path: '/tmp/fgt/'
+    debug_script_path: 'fgt.debug.shell.task'
+    output_filename: 'tac_output.txt'
+    email_sender: '<replace email sender>'
+    email_server: '<replace email server>'
+    email_server_port: '<replace email server port>'
+    email_diagnostic_type: 'TAC diagnostic report'
+    email_recipient: '<replace email recipient>'
+    email_recipient_address: '<replace recipient email address>'
+
+  tasks:
+   - name: Create temporary directory
+     ansible.builtin.tempfile:
+       state: directory
+       prefix: '{{base_folder_path}}'
+     register: folder_path
+     delegate_to: localhost
+     
+   - name: Prepare The TAC report diagnostic shell script
+     raw: |
+            cat > {{ folder_path.path }}/{{ debug_script_path }} << EOF_OUTER
+            echo 'TAC Report Diagostic Commands'
+            echo '======================================='
+            sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            execute tac report
+            exit
+            EOF
+            echo ''
+            echo '======================================='
+            echo 'Report complete'
+            EOF_OUTER
+     delegate_to: localhost
+     
+   - name: Execute the diagnostic script
+     raw: |
+            chmod +x {{folder_path.path}}/{{ debug_script_path }} && {{ folder_path.path }}/{{ debug_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     register: get_output
+     delegate_to: localhost
+     
+   - name: Save diagnostic output to local file
+     copy:
+       content: '{{ get_output.stdout }}'
+       dest: '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+     delegate_to: localhost
+
+   - name: Send email containing diagnostic output
+     community.general.mail:
+       sender: jsmith@brainky.lab
+       host: fml.brainky.lab
+       port: 25
+       to: John Smith <jsmith@brainky.lab>
+       subject: FortiGate {{ email_diagnostic_type }} for {{ inventory_hostname }}
+       body: 'Please find the attached {{ email_diagnostic_type }} for {{ inventory_hostname }}.'
+       attach:
+       - '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+       headers: 
+       - Reply-To={{ email_recipient_address }}
+       charset: us-ascii
+       secure: never
+     delegate_to: localhost
+
+   - name: Delete temporary files
+     file:
+       state: absent
+       path: '{{folder_path.path}}'
+     delegate_to: localhost

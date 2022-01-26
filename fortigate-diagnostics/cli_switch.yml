@@ -1,0 +1,98 @@
+- hosts: FortiGates
+  vars:
+    base_folder_path: '/tmp/fgt/'
+    debug_script_path: 'fgt.debug.shell.task'
+    output_filename: 'switch_output.txt'
+    email_sender: '<replace email sender>'
+    email_server: '<replace email server>'
+    email_server_port: '<replace email server port>'
+    email_diagnostic_type: 'Switch diagnostic report'
+    email_recipient: '<replace email recipient>'
+    email_recipient_address: '<replace recipient email address>'
+
+  tasks:
+   - name: Create temporary directory
+     ansible.builtin.tempfile:
+       state: directory
+       prefix: '{{base_folder_path}}'
+     register: folder_path
+     delegate_to: localhost
+
+   - name: Prepare the FortiSwitch diagnostic shell script
+     raw: |
+            cat > {{folder_path.path}}/{{ debug_script_path }} << EOF_OUTER
+            echo 'FortiSwitch Diagnostic Commands'
+            echo '======================================='
+            sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            diagnose switch-controller switch-info mac-table
+            diagnose switch-controller switch-info port-stats
+            diagnose switch-controller switch-info port-properties
+            diagnose switch-controller switch-info pdu-counters-list
+            diagnose switch-controller switch-info trunk config
+            diagnose switch-controller switch-info trunk status
+            diagnose switch-controller switch-info mclag list
+            diagnose switch-controller switch-info mclag icl
+            diagnose switch-controller switch-info poe summary
+            diagnose switch-controller switch-info lldp stats
+            diagnose switch-controller switch-info lldp neighbors-summary
+            diagnose switch-controller switch-info lldp neighbors-detail
+            diagnose switch-controller switch-info modules summary
+            diagnose switch-controller switch-info modules detail
+            diagnose switch-controller switch-info stp
+            diagnose switch-controller switch-info bpdu-guard-status
+            diagnose switch-controller switch-info mac-table
+            diagnose switch-controller switch-info igmp-snooping interface
+            diagnose switch-controller switch-info igmp-snooping group
+            diagnose switch-controller switch-info dhcp-snooping status
+            diagnose switch-controller switch-info dhcp-snooping database
+            diagnose switch-controller switch-info arp-inspection stats
+            diagnose switch-controller switch-info 802.1X
+            diagnose switch-controller switch-info mac-limit-violations all
+            diagnose switch-controller switch-info flow-tracking statistics
+            diagnose switch-controller switch-info flow-tracking flows all
+            diagnose switch-controller switch-info flow-tracking flows-raw
+            diagnose switch-controller switch-info mirror status
+            diagnose switch-controller switch-info rpvst
+            exit
+            EOF
+            echo ''
+            echo '======================================='
+            echo 'Report complete'
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Execute the diagnostic script
+     raw: |
+            chmod +x {{folder_path.path}}/{{ debug_script_path }} && {{folder_path.path}}/{{ debug_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     register: get_output
+     delegate_to: localhost
+
+   - name: Save diagnostic output to local file
+     copy:
+       content: '{{ get_output.stdout }}'
+       dest: '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+     delegate_to: localhost
+
+   - name: Send email containing diagnostic output
+     community.general.mail:
+       sender: {{ email_sender }}
+       host: {{ email_server }}
+       port: {{ email_server_port }}
+       to: {{ email_recipient }}
+       subject: FortiGate {{ email_diagnostic_type }} for {{ inventory_hostname }}
+       body: 'Please find the attached {{ email_diagnostic_type }} for {{ inventory_hostname }}.'
+       attach:
+       - '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+       headers: 
+       - Reply-To={{ email_recipient_address }}
+       charset: us-ascii
+       secure: never
+     delegate_to: localhost
+
+   - name: Delete temporary files
+     file:
+       state: absent
+       path: '{{folder_path.path}}'
+     delegate_to: localhost

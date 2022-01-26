@@ -1,0 +1,11 @@
+all:
+  children:
+    FortiGates:
+      hosts:
+        FortiGate1:
+          fgt_host: <ip address>
+        FortiGate2:
+          fgt_host: <ip address>
+  vars:
+    fgt_user: ansible_user
+    fgt_pass: password

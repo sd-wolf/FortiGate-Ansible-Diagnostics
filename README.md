@@ -25,7 +25,7 @@ Note: Still fairly new to Ansible, so this may not be (is probably not) written 
 ## To use:
 Simply call the Ansible playbook as normal. i.e.: 
 
-`ansible-playbook cli_crashlog.yml -i inventory/fortigates`
+`ansible-playbook cli_vpn.yml -i inventory/fortigates`
 
 Some playbooks have extra parameters that can be configured (especially the Flow Debug playbook). i.e.:
 

@@ -23,7 +23,11 @@ Note: Still fairly new to Ansible, so this may not be (is probably not) written 
 * Modify the email variables at the top of the playbook.
 
 ## To use:
-Simply call the Ansible playbook as necessary. Some playbooks have extra parameters that can be configured (especially the Flow Debug playbook).
+Simply call the Ansible playbook as normal. i.e.: 
+`ansible-playbook cli_crashlog.yml -i inventory/fortigates`
+
+Some playbooks have extra parameters that can be configured (especially the Flow Debug playbook).
+`ansible-playbook cli_cpu_memory.yml -i inventory/fortigates -e "top_iterations=5 top_delay=1"`
 
 ### cli_cpu_memory.yml extra variables
 * top_iterations - The number of times to run diagnose sys top (default is 15 times).

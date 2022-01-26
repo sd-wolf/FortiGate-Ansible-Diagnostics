@@ -24,9 +24,11 @@ Note: Still fairly new to Ansible, so this may not be (is probably not) written 
 
 ## To use:
 Simply call the Ansible playbook as normal. i.e.: 
+
 `ansible-playbook cli_crashlog.yml -i inventory/fortigates`
 
-Some playbooks have extra parameters that can be configured (especially the Flow Debug playbook).
+Some playbooks have extra parameters that can be configured (especially the Flow Debug playbook). i.e.:
+
 `ansible-playbook cli_cpu_memory.yml -i inventory/fortigates -e "top_iterations=5 top_delay=1"`
 
 ### cli_cpu_memory.yml extra variables

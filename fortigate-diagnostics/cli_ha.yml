@@ -1,0 +1,129 @@
+- hosts: FortiGates
+  vars:
+    base_folder_path: '/tmp/fgt/'
+    ha_debug_script_path: 'fgt.ha.shell.task'
+    output_filename: 'HA_output.txt'
+    ha_app_script_path: 'fgt.ha.applicaiton.shell.task'
+    cleanup_script_path: 'fgt.cleanup.shell.task'
+    email_sender: '<replace email sender>'
+    email_server: '<replace email server>'
+    email_server_port: '<replace email server port>'
+    email_diagnostic_type: 'VPN diagnostic report'
+    email_recipient: '<replace email recipient>'
+    email_recipient_address: '<replace recipient email address>'
+    top_repeat: '{{ top_iterations | default("6") }}'
+    top_timer: '{{ top_delay | default("5") }}'
+    ha_app_debug_timer: '{{ app_length | default("30") }}'
+
+  tasks:
+   - name: Create temporary directory
+     ansible.builtin.tempfile:
+       state: directory
+       prefix: '{{base_folder_path}}'
+     register: folder_path
+     delegate_to: localhost
+
+   - name: Prepare the HA diagnostic shell script
+     raw: |
+            cat > {{folder_path.path}}/{{ ha_debug_script_path }} << EOF_OUTER
+            echo 'HA Diagnostic Commands'
+            echo '======================================='
+            sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            show full-configuration system ha
+            get system status
+            get system performance status
+            get hardware status
+            get system ha status
+            diagnose sys top {{ top_timer }} 50 {{top_iterations }}
+            diagnose hardware sysinfo memory
+            diagnose hardware sysinfo shm
+            diagnose netlink device list
+            diagnose sys ha status
+            diagnose sys ha history read
+            diagnose sys ha checksum cluster
+            diagnose sys ha dump-by group
+            diagnose sys ha dump-by vcluster
+            diagnose sys ha dump-by rcache
+            diagnose sys ha dump-by debug-zone
+            diagnose sys ha dump-by vdom
+            diagnose sys ha dump-by kernel
+            diagnose sys ha dump-by device
+            exit
+            EOF
+            echo ''
+            echo '======================================='
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Prepare the HA Application diagnostic shell script
+     raw: |
+            cat > {{folder_path.path}}/{{ ha_app_script_path }} << EOF_OUTER
+            echo 'HA Application Diagnostic Commands'
+            echo '======================================='
+            timeout {{ ha_app_debug_timer }}s sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            diagnose debug reset
+            diagnose debug enable
+            diagnose debug application hatalk -1
+            diagnose debug application hasync -1
+            exit
+            EOF
+            echo ''
+            echo '======================================='
+            echo 'Report complete'
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Prepare the diagnostic cleanup shell script
+     raw: |
+            cat > {{folder_path.path}}/{{ cleanup_script_path }} << EOF_OUTER
+            sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            diagnose debug disable
+            diagnose debug reset
+            exit
+            EOF
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Execute the HA diagnostic scripts
+     raw: |
+            chmod +x {{folder_path.path}}/{{ ha_debug_script_path }} && {{folder_path.path}}/{{ ha_debug_script_path }} {{ fgt_pass }}
+            chmod +x {{folder_path.path}}/{{ ha_app_script_path }} && {{folder_path.path}}/{{ ha_app_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     register: get_output
+     delegate_to: localhost
+
+   - name: Execute the diagnostic cleanup script
+     raw: |
+            chmod +x {{folder_path.path}}/{{ cleanup_script_path }} && {{folder_path.path}}/{{ cleanup_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     delegate_to: localhost
+
+   - name: Save diagnostic output to local file
+     copy:
+       content: '{{ get_output.stdout }}'
+       dest: '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+     delegate_to: localhost
+
+   - name: Send email containing FortiGate diagnostic output
+     community.general.mail:
+       sender: {{ email_sender }}
+       host: {{ email_server }}
+       port: {{ email_server_port }}
+       to: {{ email_recipient }}
+       subject: FortiGate {{ email_diagnostic_type }} for {{ inventory_hostname }}
+       body: 'Please find the attached {{ email_diagnostic_type }} for {{ inventory_hostname }}'
+       attach:
+       - '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}''
+       headers: 
+       - Reply-To={{ email_recipient_address }}
+       charset: us-ascii
+       secure: never
+     delegate_to: localhost
+
+   - name: Cleanup temporary files
+     file:
+       state: absent
+       path: '{{folder_path.path}}'
+     delegate_to: localhost

@@ -1,0 +1,146 @@
+- hosts: FortiGates
+  vars:
+    base_folder_path: '/tmp/fgt/'
+    flow_script_path: 'fgt.flow.shell.task'
+    output_filename: 'flow_output.txt'
+    email_sender: '<replace email sender>'
+    email_server: '<replace email server>'
+    email_server_port: '<replace email server port>'
+    email_diagnostic_type: 'Flow Debug diagnostic report'
+    email_recipient: '<replace email recipient>'
+    email_recipient_address: '<replace recipient email address>'
+    cleanup_script_path: 'fgt.cleanup.shell.task'
+    debug_len: '{{ debug_length | default("60") }}'
+    flow_vd: '{{ vdom | default("") }}'
+    flow_vd_neg: '{{ negate_vdom | default("False") }}'
+    flow_proto: '{{ protocol | default("") }}'
+    flow_proto_neg: '{{ negate_protocol | default("False") }}'
+    flow_addr: '{{ address | default("") }}'
+    flow_addr_neg: '{{negate_address | default("False") }}'
+    flow_saddr: '{{ src_address | default("") }}'
+    flow_saddr_neg: '{{ negate_src_address | default("False") }}'
+    flow_daddr: '{{ flow_dst_address | default("") }}'
+    flow_daddr_neg: '{{ negate_dst_address | default("False") }}'
+    flow_port: '{{ port | default("") }}'
+    flow_port_neg: '{{ negate_port | default("False") }}'
+    flow_sport: '{{ src_port | default("") }}'
+    flow_sport_neg: '{{ negate_src_port | default("False") }}'
+    flow_dport: '{{ dst_port | default("") }}'
+    flow_dport_neg: '{{ negate_dst_port | default("False") }}'
+    flow_cnt: '{{ flow_count | default("100") }}'
+    flow_iprope_enabled: '{{ iprope | default("False") }}'
+    flow_function_enabled: '{{ function_name | default("False") }}'
+    flow_iprope_line: '{% if flow_iprope_enabled %}diagnose debug flow show iprope enable{% else %}{% endif %}'
+    flow_function_line: '{% if flow_function_enabled %}diagnose debug flow show function-name enable{% else %}{% endif %}'
+    flow_vd_line: '{% if flow_vd is defined and flow_vd | length %}diagnose debug flow filter vd {{ flow_vd }}{% else %}{% endif %}'
+    flow_vd_neg_line: '{% if flow_vd_neg == "True" %}diagnose debug flow filter negate vd{% else %}{% endif %}'
+    flow_proto_line: '{% if flow_proto is defined and flow_proto | length %}diagnose debug flow filter proto {{ flow_proto }}{% else %}{% endif %}'
+    flow_proto_neg_line: '{% if flow_proto_neg == "True" %}diagnose debug flow filter negate proto{% else %}{% endif %}'
+    flow_addr_line: '{% if flow_addr | ipv4 | ipaddr("address") %}diagnose debug flow filter addr {{ flow_addr }}{% else %}{% endif %}'
+    flow_addr_neg_line: '{% if flow_addr_neg == "True" %}diagnose debug flow filter negate addr{% else %}{% endif %}'
+    flow_saddr_line: '{% if flow_saddr | ipv4 | ipaddr("address") %}diagnose debug flow filter saddr {{ flow_saddr }}{% else %}{% endif %}'
+    flow_saddr_neg_line: '{% if flow_saddr_neg == "True" %}diagnose debug flow filter negate saddr{% else %}{% endif %}'
+    flow_daddr_line: '{% if flow_daddr | ipv4 | ipaddr("address") %}diagnose debug flow filter daddr {{ flow_daddr }}{% else %}{% endif %}'
+    flow_daddr_neg_line: '{% if flow_daddr_neg == "True" %}diagnose debug flow filter negate daddr{% else %}{% endif %}'
+    flow_port_line: '{% if flow_port is defined and flow_port | length %}diagnose debug flow filter port {{ flow_port }}{% else %}{% endif %}'
+    flow_port_neg_line: '{% if flow_port_neg %}diagnose debug flow filter negate port{% else %}{% endif %}'
+    flow_sport_line: '{% if flow_sport is defined and flow_sport | length %}diagnose debug flow filter sport {{ flow_sport }}{% else %}{% endif %}'
+    flow_sport_neg_line: '{% if flow_sport_neg == "True" %}diagnose debug flow filter negate sport{% else %}{% endif %}'
+    flow_dport_line: '{% if flow_dport is defined and flow_dport | length %}diagnose debug flow filter dport {{ flow_dport }}{% else %}{% endif %}'
+    flow_dport_neg_line: '{% if flow_dport_neg == "True" %}diagnose debug flow filter negate dport{% else %}{% endif %}'
+
+  tasks:
+   - name: Create temporary directory
+     ansible.builtin.tempfile:
+       state: directory
+       prefix: '{{base_folder_path}}'
+     register: folder_path
+     delegate_to: localhost
+
+   - name: Prepare the Flow Debug diagnostic script
+     raw: |
+            cat > {{folder_path.path}}/{{ flow_script_path }} << EOF_OUTER
+            echo 'Flow Debug Diagnostic Commands'
+            echo '======================================='
+            timeout {{debug_len}}s sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            diag debug reset
+            diagnose debug enable
+            {{ flow_iprope_line }}
+            {{ flow_function_line }}
+            {{ flow_vd_line }}
+            {{ flow_proto_line }}
+            {{ flow_addr_line }}
+            {{ flow_saddr_line }}
+            {{ flow_daddr_line }}
+            {{ flow_port_line }}
+            {{ flow_sport_line }}
+            {{ flow_dport_line }}
+            {{ flow_vd_neg_line }}
+            {{ flow_proto_neg_line }}
+            {{ flow_addr_neg_line }}
+            {{ flow_saddr_neg_line }}
+            {{ flow_daddr_neg_line }}
+            {{ flow_port_neg_line }}
+            {{ flow_sport_neg_line }}
+            {{ flow_dport_neg_line }}
+            diag debug flow trace start {{ flow_cnt }}
+            EOF
+            echo ''
+            echo '======================================='
+            echo 'Report complete'
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Prepare the cleanup script
+     raw: |
+            cat > {{folder_path.path}}/{{ cleanup_script_path }} << EOF_OUTER
+            sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            diagnose debug disable
+            diagnose debug reset
+            exit
+            EOF
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Execute the diagnostic script
+     raw: |
+            chmod +x {{folder_path.path}}/{{ flow_script_path }} && {{folder_path.path}}/{{ flow_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     register: get_output
+     delegate_to: localhost
+
+   - name: Execute the diagnostic cleanup script
+     raw: |
+            chmod +x {{folder_path.path}}/{{ cleanup_script_path }} && {{folder_path.path}}/{{ cleanup_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     delegate_to: localhost
+
+   - name: Save diagnostic output to local file
+     copy:
+       content: '{{ get_output.stdout }}'
+       dest: '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+     delegate_to: localhost
+
+   - name: Send email containing diagnostic outputs
+     community.general.mail:
+       sender: {{ email_sender }}
+       host: {{ email_server }}
+       port: {{ email_server_port }}
+       to: {{ email_recipient }}
+       subject: FortiGate {{ email_diagnostic_type }} for {{ inventory_hostname }}
+       body: 'Please find the attached {{ email_diagnostic_type }} for {{ inventory_hostname }}'
+       attach:
+       - '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+       headers: 
+       - Reply-To={{ email_recipient_address }}
+       charset: us-ascii
+       secure: never
+     delegate_to: localhost
+
+   - name: Delete temporary files
+     file:
+       state: absent
+       path: '{{folder_path.path}}'
+     delegate_to: localhost

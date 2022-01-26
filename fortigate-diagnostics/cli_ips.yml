@@ -1,0 +1,89 @@
+- hosts: FortiGates
+  vars:
+    base_folder_path: '/tmp/fgt/'
+    ips_script_path: 'fgt.ips.shell.task'
+    output_filename: 'IPS_output.txt'
+    email_sender: '<replace email sender>'
+    email_server: '<replace email server>'
+    email_server_port: '<replace email server port>'
+    email_recipient: '<replace email recipient>'
+    email_recipient_address: '<replace recipient email address>'
+
+  tasks:
+   - name: Create temporary directory
+     ansible.builtin.tempfile:
+       state: directory
+       prefix: '{{base_folder_path}}'
+     register: folder_path
+     delegate_to: localhost
+
+   - name: Prepare the IPS diagnostic shell script
+     raw: |
+            cat > {{folder_path.path}}/{{ ips_script_path }} << EOF_OUTER
+            echo 'IPS Diagnostic Commands'
+            echo '======================================='
+            sshpass -p \$1 ssh -tt -o StrictHostKeyChecking=no {{ fgt_user }}@{{ fgt_host }} <<EOF
+            show full-configuration ips global
+            get system status
+            get system performance status
+            get system auto-update versions
+            diagnose autoupdate status
+            diagnose autoupdate versions
+            get hardware status
+            diagnose hardware sysinfo memory
+            diagnose sys session stat
+            diagnose ips packet status
+            diagnose ips anomaly list
+            diagnose ips memory status
+            diagnose ips memory pool
+            diagnose ips memory list
+            diagnose ips session status
+            diagnose ips session performance
+            diagnose ips share pool
+            diagnose ips share list
+            diagnose ips dissector status
+            diagnose test application ipsmonitor 1
+            diagnose test application ipsmonitor 3
+            exit
+            EOF
+            echo ''
+            echo '======================================='
+            echo 'Report complete'
+            EOF_OUTER
+     delegate_to: localhost
+
+   - name: Execute the diagnostic script
+     raw: |
+            chmod +x {{folder_path.path}}/{{ ips_script_path }} && {{folder_path.path}}/{{ ips_script_path }} {{ fgt_pass }}
+     args:
+       executable: /bin/bash
+     register: get_output
+     delegate_to: localhost
+
+   - name: Save diagnostic output to local file
+     copy:
+       content: '{{ get_output.stdout }}'
+       dest: '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+     delegate_to: localhost
+
+   - name: Send email containing diagnostic output
+     community.general.mail:
+       sender: {{ email_sender }}
+       host: {{ email_server }}
+       port: {{ email_server_port }}
+       to: {{ email_recipient }}
+       subject: FortiGate IPS diagnostic report for {{ inventory_hostname }}
+       body: 'Please find the IPS diagnostic attached report for {{ inventory_hostname }}.'
+       attach:
+       - '{{folder_path.path}}/{{ inventory_hostname }}_{{ output_filename }}'
+       headers: 
+       - Reply-To={{ email_recipient_address }}
+       charset: us-ascii
+       secure: never
+     delegate_to: localhost
+
+   - name: Delete temporary files
+     file:
+       state: absent
+       path: '{{folder_path.path}}'
+     delegate_to: localhost
